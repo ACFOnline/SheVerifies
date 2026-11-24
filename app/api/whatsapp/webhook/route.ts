@@ -1,4 +1,5 @@
 // app/api/whatsapp/webhook/route.ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { answerHRQuestion } from '@/lib/rag';
 import { sendWhatsAppMessage, markMessageAsRead } from '@/lib/whatsapp';
@@ -7,6 +8,22 @@ export const runtime = 'nodejs';
 
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const ESCALATION_NUMBER = process.env.WHATSAPP_ESCALATION_NUMBER;
+
+function hasValidMetaSignature(rawBody: string, signature: string | null): boolean {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret || !signature) {
+    return false;
+  }
+
+  const match = /^sha256=([a-f0-9]{64})$/i.exec(signature);
+  if (!match) {
+    return false;
+  }
+
+  const expected = createHmac('sha256', appSecret).update(rawBody).digest();
+  const received = Buffer.from(match[1], 'hex');
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
 
 // --- WhatsApp Cloud API payload types ---
 
@@ -52,7 +69,7 @@ export async function GET(req: NextRequest) {
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+  if (VERIFY_TOKEN && mode === 'subscribe' && token === VERIFY_TOKEN) {
     console.log('✅ WhatsApp webhook verified');
     return new NextResponse(challenge, { status: 200 });
   }
@@ -64,7 +81,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as WhatsAppWebhookPayload;
+    const rawBody = await req.text();
+    if (!hasValidMetaSignature(rawBody, req.headers.get('x-hub-signature-256'))) {
+      return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
+    }
+
+    const body = JSON.parse(rawBody) as WhatsAppWebhookPayload;
 
     if (body.object !== 'whatsapp_business_account') {
       return NextResponse.json({ ok: true });
