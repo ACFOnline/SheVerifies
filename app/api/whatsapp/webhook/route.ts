@@ -2,7 +2,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { answerHRQuestion } from '@/lib/rag';
-import { sendWhatsAppMessage, markMessageAsRead } from '@/lib/whatsapp';
+import { sendWhatsAppEscalation, sendWhatsAppMessage, markMessageAsRead } from '@/lib/whatsapp';
 
 export const runtime = 'nodejs';
 
@@ -39,9 +39,15 @@ interface WhatsAppMessage {
   text?: WhatsAppText;
 }
 
+interface WhatsAppContact {
+  profile?: { name?: string };
+  wa_id?: string;
+}
+
 interface WhatsAppValue {
   messaging_product: string;
   metadata: { display_phone_number: string; phone_number_id: string };
+  contacts?: WhatsAppContact[];
   messages?: WhatsAppMessage[];
   statuses?: unknown[];
 }
@@ -102,24 +108,28 @@ export async function POST(req: NextRequest) {
 
           const userPhone = message.from;
           const question = message.text.body.trim();
+          if (!question) continue;
 
           // Mark as read immediately so the user sees blue ticks
           markMessageAsRead(message.id).catch((err) =>
             console.error('Failed to mark as read:', err)
           );
 
-          if (!question) continue;
-
           const { answer, shouldEscalate } = await answerHRQuestion(question);
 
           if (shouldEscalate && ESCALATION_NUMBER) {
-            // Forward the question to the designated HR/MEAL officer
-            await sendWhatsAppMessage(
+            const contact = change.value.contacts?.find((item) => item.wa_id === userPhone)
+              ?? change.value.contacts?.[0];
+            const contactName = contact?.profile?.name || 'WhatsApp user';
+
+            await sendWhatsAppEscalation(
               ESCALATION_NUMBER,
-              `📋 *Escalated Query*\n\n` +
-                `*From:* ${userPhone}\n` +
-                `*Question:* ${question}\n\n` +
-                `The assistant could not confidently answer this. Please follow up directly with this person.`
+              {
+                name: contactName,
+                phone: `+${userPhone.replace(/\D/g, '')}`,
+                summary: 'ACF-related question needs human follow-up',
+                message: question,
+              },
             );
 
             // Let the user know it's been escalated

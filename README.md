@@ -45,6 +45,27 @@ sufficient evidence request escalation. Currently, only the WhatsApp webhook
 forwards those questions, and it sends them to the single
 `WHATSAPP_ESCALATION_NUMBER`; web and Telegram responses do not forward them.
 
+### WhatsApp escalation template
+
+The WhatsApp webhook sends staff escalations with the approved `escalation_alert`
+template in English (`en`). Create and get approval for a body matching this
+layout in WhatsApp Manager:
+
+```text
+Escalation alert
+Name: {{1}}
+Phone: {{2}}
+Summary: {{3}}
+Message: {{4}}
+```
+
+The webhook normalizes whitespace in all four parameters, limits the user's
+message to 650 characters, and checks that the rendered body stays within
+Meta's 1,024-character limit. The escalation recipient must be configured in
+`WHATSAPP_ESCALATION_NUMBER` and opted in to receive WhatsApp messages. The
+user-facing reply is sent as a service message within the 24-hour customer
+service window opened by the user's inbound message.
+
 ## Run locally
 
 ```bash
